@@ -2,7 +2,7 @@
 Hooknet_SE-ResNeXt101_32x4d
 description: The same model as the structure in the paper (https://arxiv.org/abs/2006.12230) with backbone SE-ResNeXt101_32x4d model (https://arxiv.org/pdf/1709.01507v4.pdf). 
 Number of input image: 2 images with the same size and center but with different resolution (Target: high resolution, Context: low resolution)
-size: (2, 3, 284, 284) -> (70, 70)
+size: (2, 3, 512, 512) -> (512, 512)
 
 ResNet code gently borrowed from
 https://github.com/pytorch/vision/blob/master/torchvision/models/resnet.py

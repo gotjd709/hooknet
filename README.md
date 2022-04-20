@@ -27,8 +27,8 @@ Above, I install python 3.6 with CUDA 11.4
 # Description
 
 ### Repository Structure
-- `model/hooknet.py`: main HookNet and Quad-scale HookNet model script
-- `model/hooknet_se_resnext101_32x4d.py`: main HookNet_SE-ResNeXt101_32x4d model script
+- `model/hooknet.py`: main HookNet and Quad-scale HookNet model script (input shape :: 2x3x284x284)
+- `model/hooknet_se_resnext101_32x4d.py`: main HookNet_SE-ResNeXt101_32x4d model script (input shape :: 2x3x512x512)
 - `datagen.py`: the data dataloader and augmentation script
 - `functional.py`: naming a weight of model and converting outputs to images script 
 - `test_view.py`: visualizing outputs script

@@ -27,8 +27,8 @@ Above, I install python 3.6 with CUDA 11.4
 # Description
 
 ### Repository Structure
-- `model/hooknet.py`: main HookNet and Quad-scale HookNet model script (input shape :: 2x3x284x284)
-- `model/hooknet_se_resnext101_32x4d.py`: main HookNet_SE-ResNeXt101_32x4d model script (input shape :: 2x3x512x512)
+- `model/hooknet.py`: main HookNet [input_image_shape :: (284x284x3) x 2, input_mask_shape :: (70x70) x 1]and Quad-scale HookNet model script [input_image_shape :: (284x284x3) x 4, input_mask_shape :: (70x70) x 1]
+- `model/hooknet_se_resnext101_32x4d.py`: main HookNet_SE-ResNeXt101_32x4d model script [input_image_shape :: (512x512x3) x 2, input_mask_shape :: (512x512) x 1]
 - `datagen.py`: the data dataloader and augmentation script
 - `functional.py`: naming a weight of model and converting outputs to images script 
 - `test_view.py`: visualizing outputs script
@@ -38,7 +38,7 @@ Above, I install python 3.6 with CUDA 11.4
 
 ##### Data Preparation
 ```
-HookNet_Data
+Hooknet
     ├ slide_num_1
     |       ├ input_x1
     |       ├ input_x2
@@ -55,32 +55,43 @@ HookNet_Data
             ├ input_x8
             └ input_y1    
 ```
+if you want to train with hooknet(normal) or quad_scale_hooknet... (These models are trained with valid padding.)
 - input_x1: mpp=1 image patches(284x284x3) directory
 - input_x2: mpp=2 image patches(284x284x3) directory
 - input_x4: mpp=4 image patches(284x284x3) directory
 - input_x8: mpp=8 image patches(284x284x3) directory
-- input_y1: mpp=1 mask patches(284x284) directory (The shape of the mask patches will be 70x70 by cropping.)
+- input_y1: mpp=1 mask patches(70x70) directory 
 
+if you want to train with hooknet(se_resnext101_32x4d)... (This models is trained with same padding.)
+- input_x1: mpp=1 image patches(512x512x3) directory
+- input_x2: mpp=2 image patches(512x512x3) directory
+- input_x4: mpp=4 image patches(512x512x3) directory
+- input_x8: mpp=8 image patches(512x512x3) directory
+- input_y1: mpp=1 mask patches(512x512) directory 
 </br>
 
 
 ##### Train Example
 ```
-python train.py --BASE_PATH './HookNet_Data/*/input_y1/*.png' --INPUT_SHAPE 284 --CLASSES 3  --TARGET_INDICE 4 --CONTEXT_INDICE 2 --MODEL 'hooknet'--ENCODER 'normal' --LOSS_FUNCTION 'dice_loss' --DESCRIPTION 'HookNet_test'
+python train.py --BASE_PATH './slide_num_*/input_y1/*.png' --INPUT_SHAPE 284 --CLASSES 4 --MODEL 'hooknet' --ENCODER 'normal' --DESCRIPTION 'first_hooknet_try'
 ```
 
 ##### Train Option
-- `--BASE_PATH`: The path of input_y1 mask patches 
-- `--BATCH_SIZE`: The batch size of training model.
-- `--INPUT_SHAPE`: The input shape of the patch.
-- `--CLASSES`: The number of output classes.
-- `--TARGET_INDICE`: The number of target indice of Hooknet. It should be 5 > target > context > 1.
-- `--CONTEXT_INDICE`: The number of context indice of HookNet. It should be 5 > target > context > 1.
-- `--EPOCHS`: The epochs batch size of training model.
-- `--MODEL`: Choose the model either hooknet or quad_scale_hooknet
-- `--ENCODER`: Choose the encoder model either normal or se_resnext101_32x4d
-- `--LOSS_FUNCTION`: Choose the loss function either celoss or diceloss
-- `--DESCRIPTION`: Add the name of a training model weight.
+- `--BASE_PATH`: The path of input_y1 mask patches (ex. './slide_num_*/input_y1/*.png')
+- `--BATCH_SIZE`: The batch size of training model. (ex. 8)
+- `--INPUT_SHAPE`: The input shape of the patch. (ex. 284 - hooknet with normal, quad_scale_hooknet or 512 - hooknet with se_resnext101_32x4d)
+- `--CLASSES`: The number of output classes. (ex. 3 or 4)
+- `--TARGET_INDICE`: The number of target indice of Hooknet. It should be 5 > target > context > 1. (ex. 1 or 2 or 3 or 4)
+- `--CONTEXT_INDICE`: The number of context indice of HookNet. It should be 5 > target > context > 1. (ex. 1 or 2 or 3)
+- `--EPOCHS`: The epochs batch size of training model. (ex. 50)
+- `--MODEL`: Choose the model either hooknet or quad_scale_hooknet (ex. 'hooknet' or 'quad_scale_hooknet')
+- `--ENCODER`: Choose the encoder model either normal or se_resnext101_32x4d (ex. 'normal' or 'se_resnext101_32x4d')
+- `--LOSS_FUNCTION`: Choose the loss function either celoss or diceloss (ex. 'celoss' or 'diceloss')
+- `--DESCRIPTION`: Add the name of a training model weight. (ex. 'first_hooknet_try')
+
+</br>
+
+You can get this data structure by using [util_multi.py](https://github.com/CODiPAI-CMC/wsi_processing)
 
 # Reference
 

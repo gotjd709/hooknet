@@ -1,3 +1,4 @@
+from fileinput import hook_compressed
 from torch.utils.data                         import Dataset
 from sklearn.utils                            import shuffle
 from albumentations                           import *
@@ -8,9 +9,9 @@ import cv2
 
 
 class PathSplit:
-    def __init__(self, base_path):
+    def __init__(self, base_path, hook_indice):
         self.base_path = glob.glob(base_path)
-
+        self.hook_indice = hook_indice
     def Path(self):
         self.TRAIN_TARGET_PATH = shuffle(self.base_path, random_state=321)[:int(0.60*len(self.base_path))]
         self.VALID_TARGET_PATH = shuffle(self.base_path, random_state=321)[int(0.60*len(self.base_path)):int(0.80*len(self.base_path))]
@@ -22,32 +23,36 @@ class PathSplit:
 
 
 class PathSplit_Hooknet(PathSplit):
-    def __init__(self, base_path):
+    def __init__(self, base_path, hook_indice):
         super(PathSplit_Hooknet, self).__init__(
-            base_path = base_path
+            base_path = base_path,
+            hook_indice = hook_indice
         )
 
     def Split(self):
         # split path
+        target_indice = 2 ** (4-int(self.hook_indice[0])) 
+        context_indice = 2 ** (4-int(self.hook_indice[1])) 
         TRAIN_ZIP = shuffle(
-        [('/'.join(x.split('/')[:-2])+'/input_x1/'+x.split('/')[-1], '/'.join(x.split('/')[:-2])+'/input_x4/'+x.split('/')[-1], x) for x in self.Path()[0]],
+        [('/'.join(x.split('/')[:-2])+f'/input_x{target_indice}/'+x.split('/')[-1], '/'.join(x.split('/')[:-2])+f'/input_x{context_indice}/'+x.split('/')[-1], x) for x in self.Path()[0]],
             random_state=333
         )
         VALID_ZIP = shuffle(
-        [('/'.join(x.split('/')[:-2])+'/input_x1/'+x.split('/')[-1], '/'.join(x.split('/')[:-2])+'/input_x4/'+x.split('/')[-1], x) for x in self.Path()[1]],
+        [('/'.join(x.split('/')[:-2])+f'/input_x{target_indice}/'+x.split('/')[-1], '/'.join(x.split('/')[:-2])+f'/input_x{context_indice}/'+x.split('/')[-1], x) for x in self.Path()[1]],
             random_state=333
         )
         TEST_ZIP = shuffle(
-        [('/'.join(x.split('/')[:-2])+'/input_x1/'+x.split('/')[-1], '/'.join(x.split('/')[:-2])+'/input_x4/'+x.split('/')[-1], x) for x in self.Path()[2]],
+        [('/'.join(x.split('/')[:-2])+f'/input_x{target_indice}/'+x.split('/')[-1], '/'.join(x.split('/')[:-2])+f'/input_x{context_indice}/'+x.split('/')[-1], x) for x in self.Path()[2]],
             random_state=333
         )
         return TRAIN_ZIP, VALID_ZIP, TEST_ZIP
 
 
 class PathSplit_QuadScaleHooknet(PathSplit): 
-    def __init__(self, base_path):
+    def __init__(self, base_path, hook_indice):
         super(PathSplit_QuadScaleHooknet, self).__init__(
-            base_path = base_path
+            base_path = base_path,
+            hook_indice = hook_indice
         )
 
     def Split(self):
@@ -69,15 +74,16 @@ class PathSplit_QuadScaleHooknet(PathSplit):
 
 
 class PathToDataset:
-    def __init__(self, path_list, image_size, mode):
+    def __init__(self, path_list, image_size, classes, mode):
         self.path_list = path_list
         self.image_size = image_size
-        self.mask_size = (70,70) if image_size == 284 else (512,512)
+        self.mask_size = (70,70) if image_size == (284,284) else (512,512)
+        self.classes = classes
         self.mode = mode
 
     def NumpyDataset(self):
         batch_x = np.zeros((len(self.path_list),) + (2,) + self.image_size + (3,), dtype='float32') if self.mode == 1 else np.zeros((len(self.path_list),) + (4,) + self.image_size + (3,), dtype='float32')
-        batch_y = np.zeros((len(self.path_list),) + self.mask_size + (4,), dtype='float32')
+        batch_y = np.zeros((len(self.path_list),) + self.mask_size + (int(self.classes),), dtype='float32')
         for j, path in enumerate(self.path_list):
             img_path1 = path[0]
             img_path2 = path[1]
@@ -88,13 +94,14 @@ class PathToDataset:
                 mask_path = path[4]
                 batch_x[j][2] = cv2.imread(img_path3).astype(np.float32)
                 batch_x[j][3] = cv2.imread(img_path4).astype(np.float32)
-            mask = cv2.imread(mask_path, 0)[107:177,107:177] if self.mask_size == (70,70) else cv2.imread(mask_path, 0)
+            mask = cv2.imread(mask_path, 0) 
             batch_x[j][0] = cv2.imread(img_path1).astype(np.float32)
             batch_x[j][1] = cv2.imread(img_path2).astype(np.float32)
             batch_y[j][:,:,0] = np.where(mask==0, 1, 0)
             batch_y[j][:,:,1] = np.where(mask==1, 1, 0)
             batch_y[j][:,:,2] = np.where(mask==2, 1, 0)
-            batch_y[j][:,:,3] = np.where(mask==3, 1, 0)
+            if self.classes == 4:
+                batch_y[j][:,:,3] = np.where(mask==3, 1, 0) 
         return batch_x, batch_y, self.path_list
 
 

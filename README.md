@@ -68,8 +68,10 @@ if you want to train with hooknet(se_resnext101_32x4d)... (This models is traine
 - input_x4: mpp=4 image patches(512x512x3) directory
 - input_x8: mpp=8 image patches(512x512x3) directory
 - input_y1: mpp=1 mask patches(512x512) directory 
+
 </br>
 
+You can get this data structure by using [util_multi.py](https://github.com/CODiPAI-CMC/wsi_processing)
 
 ##### Train Example
 ```
@@ -88,10 +90,6 @@ python train.py --BASE_PATH './slide_num_*/input_y1/*.png' --INPUT_SHAPE 284 --C
 - `--ENCODER`: Choose the encoder model either normal or se_resnext101_32x4d (ex. 'normal' or 'se_resnext101_32x4d')
 - `--LOSS_FUNCTION`: Choose the loss function either celoss or diceloss (ex. 'celoss' or 'diceloss')
 - `--DESCRIPTION`: Add the name of a training model weight. (ex. 'first_hooknet_try')
-
-</br>
-
-You can get this data structure by using [util_multi.py](https://github.com/CODiPAI-CMC/wsi_processing)
 
 # Reference
 

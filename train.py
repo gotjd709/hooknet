@@ -1,4 +1,4 @@
-from datagen                            import PathSplit_Hooknet, PathSplit_QuadScaleHooknet, PathToDataset, TensorData_scale1, TensorData_scale2
+from datagen                            import PathSplit_Hooknet, PathSplit_QuadScaleHooknet, TensorData_scale1, TensorData_scale2
 from functional                         import name_weight
 from torchsampler                       import ImbalancedDatasetSampler
 from torch.utils.tensorboard            import SummaryWriter
@@ -32,38 +32,20 @@ def train(BASE_PATH, BATCH_SIZE, INPUT_SHAPE, CLASSES, INDICE, EPOCHS, MODEL, EN
         else:
             raise NameError('Choose between normal and se_resnext101_32x4d.')
         ### Path Setting
-        mode = 1
         Path = PathSplit_Hooknet(BASE_PATH, INDICE)
         TRAIN_ZIP, VALID_ZIP, TEST_ZIP = Path.Split()
-        ### Dataset, DataLoader Customizing
-        train_dataset = PathToDataset(TRAIN_ZIP, INPUT_SHAPE, CLASSES, mode)
-        valid_dataset = PathToDataset(VALID_ZIP, INPUT_SHAPE, CLASSES, mode)
-        test_dataset = PathToDataset(TEST_ZIP, INPUT_SHAPE, CLASSES, mode)
-        ### Dataset
-        train_x, train_y, train_ph = train_dataset.NumpyDataset()
-        train_data = TensorData_scale1(train_x, train_y, train_ph, INPUT_SHAPE, augmentation=True)
-        valid_x, valid_y, valid_ph = valid_dataset.NumpyDataset()
-        valid_data = TensorData_scale1(valid_x, valid_y, valid_ph, INPUT_SHAPE)                  
-        test_x, test_y, test_ph = test_dataset.NumpyDataset()
-        test_data = TensorData_scale1(test_x, test_y, test_ph, INPUT_SHAPE)
+        train_data = TensorData_scale1(TRAIN_ZIP, INPUT_SHAPE, CLASSES, augmentation=True)
+        valid_data = TensorData_scale1(VALID_ZIP, INPUT_SHAPE, CLASSES)                  
+        test_data = TensorData_scale1(TEST_ZIP, INPUT_SHAPE, CLASSES)
     elif MODEL == 'quad_scale_hooknet':
         model = quad_scale_hooknet(in_channels=3, class_num=CLASSES)
         print('quad_scale_hooknet')
         ### Path Setting
-        mode = 2
         Path = PathSplit_QuadScaleHooknet(BASE_PATH, INDICE)
         TRAIN_ZIP, VALID_ZIP, TEST_ZIP = Path.Split()
-        ### Dataset, DataLoader Customizing
-        train_dataset = PathToDataset(TRAIN_ZIP, INPUT_SHAPE, CLASSES, mode)
-        valid_dataset = PathToDataset(VALID_ZIP, INPUT_SHAPE, CLASSES, mode)
-        test_dataset = PathToDataset(TEST_ZIP, INPUT_SHAPE, CLASSES, mode)
-        ### Dataset
-        train_x, train_y, train_ph = train_dataset.NumpyDataset()
-        train_data = TensorData_scale2(train_x, train_y, train_ph, INPUT_SHAPE, augmentation=True)
-        valid_x, valid_y, valid_ph = valid_dataset.NumpyDataset()
-        valid_data = TensorData_scale2(valid_x, valid_y, valid_ph, INPUT_SHAPE)                  
-        test_x, test_y, test_ph = test_dataset.NumpyDataset()
-        test_data = TensorData_scale2(test_x, test_y, test_ph, INPUT_SHAPE)
+        train_data = TensorData_scale2(TRAIN_ZIP, INPUT_SHAPE, CLASSES, augmentation=True)
+        valid_data = TensorData_scale2(VALID_ZIP, INPUT_SHAPE, CLASSES)                  
+        test_data = TensorData_scale2(TEST_ZIP, INPUT_SHAPE, CLASSES)
     else: 
         raise NameError('Choose between hooknet and quad_scale_hooknet.')
 

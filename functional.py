@@ -1,64 +1,92 @@
-from datetime                     import date
-import matplotlib.pyplot          as plt
-import numpy                      as np
+from segmentation_models_pytorch.utils.meter                 import AverageValueMeter
+from config                                                  import *
+from tqdm                                                    import tqdm
 import torch
-import cv2
-import os
+import sys
 
-def name_weight(frame=None, model=None, classes=None, description=None):
-    mode = 'binary_class' if classes==1 else 'multi_class'
-    if frame == 'tensorflow' and model != None:
-        try:
-            os.makedirs('../log/tensorflow', exist_ok = True)
-            return '../log/tensorflow/' + f'{mode}_{model}_{description}_{date.today()}.h5'
-        except:
-            return '../log/tensorflow/' + f'{mode}_{model}_{description}_{date.today()}.h5'
-    elif frame == 'pytorch' and model != None:
-        try:
-            os.makedirs('../log/pytorch', exist_ok = True)
-            return '../log/pytorch/' + f'{mode}_{model}_{description}_{date.today()}.pth'
-        except:
-            return '../log/pytorch/' + f'{mode}_{model}_{description}_{date.today()}.pth'
-    else:
-        raise NameError('Check frame or model. frame should be tensorflow or pytorch. model should be model`s name.')
+def to_device_setting(device, loss, metrics):
+    loss = loss.to(device)
+    for metric in metrics:
+        metric.to(device)
+    return loss, metrics
 
-def visualize(**images):
-    """PLot images in one row."""
-    n = len(images)
-    plt.figure(figsize=(16, 5))
-    for i, (name, image) in enumerate(images.items()):
-        plt.subplot(1, n, i + 1)
-        plt.xticks([])
-        plt.yticks([])
-        plt.title(' '.join(name.split('_')).title())
-        plt.imshow(image, vmin=0, vmax=3, cmap='Oranges')
-    plt.show()
 
-def predict(TEST_ZIP, MODEL, device, best_model, INPUT_SHAPE):
-    for i in range(len(TEST_ZIP)):
-        
-        image_vis = cv2.imread(TEST_ZIP[i][0]).astype('uint8')
-        
-        if MODEL == 'hooknet':
-            image_batch = np.zeros((2,) + INPUT_SHAPE + (3,), dtype='float32')
-            image_batch[0,...] = cv2.imread(TEST_ZIP[i][0]).astype(np.float32) 
-            image_batch[1,...] = cv2.imread(TEST_ZIP[i][1]).astype(np.float32)
-            gt_mask = cv2.imread(TEST_ZIP[i][2], 0)
-            image_batch = torch.from_numpy(image_batch).float().to(device).unsqueeze(0).permute(0,1,4,2,3)
-        elif MODEL == 'quad_scale_hooknet':
-            image_batch = np.zeros((4,) + INPUT_SHAPE + (3,), dtype='float32')
-            image_batch[0,...] = cv2.imread(TEST_ZIP[i][0]).astype(np.float32) 
-            image_batch[1,...] = cv2.imread(TEST_ZIP[i][1]).astype(np.float32) 
-            image_batch[2,...] = cv2.imread(TEST_ZIP[i][2]).astype(np.float32)
-            image_batch[3,...] = cv2.imread(TEST_ZIP[i][3]).astype(np.float32)
-            gt_mask = cv2.imread(TEST_ZIP[i][4], 0)           
-            image_batch = torch.from_numpy(image_batch).float().to(device).unsqueeze(0).permute(0,1,4,2,3)
-        pr_mask = best_model(image_batch)
-        pr_mask = pr_mask.squeeze().permute(1,2,0).cpu().detach().numpy().round()
-        pr_mask = np.argmax(pr_mask, axis=2)
+def meter_setting(metrics):
+    logs = {}
+    loss_meter = AverageValueMeter()
+    metrics_meters = {metric.__name__: AverageValueMeter() for metric in metrics}
+    return logs, loss_meter, metrics_meters
 
-        visualize(
-            image=image_vis, 
-            ground_truth_mask=gt_mask, 
-            predicted_mask=pr_mask
-        )
+
+def loss_update(logs, post_loss, loss, loss_meter):
+    loss_value = post_loss.cpu().detach().numpy()
+    loss_meter.add(loss_value)
+    loss_logs = {'loss' : loss_meter.mean}
+    logs.update(loss_logs)
+    return logs, loss_meter
+
+
+def metrics_update(logs, metrics, metrics_meter, y_pred, y):
+    for metric in metrics:
+        metric_value = metric(y_pred, y).cpu().detach().numpy()
+        metrics_meter[metric.__name__].add(metric_value)
+    metrics_logs = {k: v.mean for k, v in metrics_meter.items()}
+    logs.update(metrics_logs)
+    return logs, metrics_meter
+
+
+def train_epoch(device, train_loader, model, loss, metrics, optimizer):
+    model.train()
+    loss, metrics = to_device_setting(device, loss, metrics)
+    logs, loss_meter, metrics_meter = meter_setting(metrics)
+
+    with tqdm(
+        train_loader,
+        desc='train',
+        file=sys.stdout,
+        disable=not (True),
+    ) as iterator:
+        for x, y in iterator:
+            x, y = x.to(device), y.to(device)
+            optimizer.zero_grad()
+            y_pred_t, y_pred_c = model.forward(x)[:,0,...], model.forward(x)[:,1,...]
+            post_loss = 0.75*loss(y_pred_t, y[:,0,...]) + 0.25*loss(y_pred_c, y[:,1,...])
+            post_loss.backward()
+            optimizer.step()
+
+            logs, loss_meter = loss_update(logs, post_loss, loss, loss_meter)
+
+            logs, metrics_meter = metrics_update(logs, metrics, metrics_meter, y_pred_t, y[:,0,...])
+
+            str_logs = ['{} - {:.4}'.format(k, v) for k, v in logs.items()]
+            s = ', '.join(str_logs)
+            iterator.set_postfix_str(s)
+    return logs
+
+
+def test_epoch(device, test_loader, model, loss, metrics, desc):
+    model.eval()
+    loss, metrics = to_device_setting(device, loss, metrics)
+    logs, loss_meter, metrics_meter = meter_setting(metrics)
+
+    with tqdm(
+        test_loader,
+        desc=desc,
+        file=sys.stdout,
+        disable=not (True),
+    ) as iterator:
+        for x, y in iterator:
+            x, y = x.to(device), y.to(device)
+            with torch.no_grad():
+                y_pred_t, y_pred_c = model.forward(x)[:,0,...], model.forward(x)[:,1,...]
+                post_loss = 0.75*loss(y_pred_t, y[:,0,...]) + 0.25*loss(y_pred_c, y[:,1,...])
+
+            logs, loss_meter = loss_update(logs, post_loss, loss, loss_meter)
+
+            logs, metrics_meter = metrics_update(logs, metrics, metrics_meter, y_pred_t, y[:,0,...])
+
+            str_logs = ['{} - {:.4}'.format(k, v) for k, v in logs.items()]
+            s = ', '.join(str_logs)
+            iterator.set_postfix_str(s)
+    return logs
+

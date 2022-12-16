@@ -13,7 +13,16 @@ import math
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils import model_zoo
+import torchvision.transforms
+import torchvision.models as models
+
+"""
+
+SE_ResNext101_32x4d models
+
+"""
 
 __all__ = ['SENet', 'senet154', 'se_resnet50', 'se_resnet101', 'se_resnet152',
            'se_resnext50_32x4d', 'se_resnext101_32x4d']
@@ -402,17 +411,18 @@ class Backbone_Block(nn.Module):
         
         return x
 
-class Identical_Block(nn.Module):
+
+class TransConv_Block(nn.Module):
     def __init__(self, in_c, out_c, k_size, stride, padding):
         super().__init__()
-        self.conv = nn.Conv2d(in_channels=in_c, out_channels=out_c, kernel_size=k_size, stride=stride, padding=padding)
+        self.conv = nn.ConvTranspose2d(in_channels=in_c, out_channels=out_c, kernel_size=k_size, stride=stride, padding=padding)
         self.batch = nn.BatchNorm2d(num_features=out_c)
-        self.ident = nn.Identity()
+        self.relu = nn.ReLU(inplace=True)
     
     def forward(self, x):
         x = self.conv(x)
         x = self.batch(x)
-        x = self.ident(x)
+        x = self.relu(x)
         return(x)
 
 """
@@ -421,175 +431,178 @@ HookNet
 
 """
 
-
 class Hooknet(nn.Module):
-    def __init__(self, class_num, hook_indice=[4,2]):
-        super().__init__()   
+    
+    def __init__(self, class_num, hook_indice):
+        super().__init__()
 
-        # Contracting Path 
         self.hook_indice = hook_indice
-        self.layer00 = se_resnext101_32x4d().__dict__['_modules']['layer0'][:-1]
-        self.layer01 = se_resnext101_32x4d().__dict__['_modules']['layer0'][-1]
-        self.layer10 = se_resnext101_32x4d().__dict__['_modules']['layer1'][0]
-        self.layer11 = se_resnext101_32x4d().__dict__['_modules']['layer1'][1:]
-        self.layer20 = se_resnext101_32x4d().__dict__['_modules']['layer2'][0]
-        self.layer21 = se_resnext101_32x4d().__dict__['_modules']['layer2'][1:]
-        self.layer30 = se_resnext101_32x4d().__dict__['_modules']['layer3'][0]
-        self.layer31 = se_resnext101_32x4d().__dict__['_modules']['layer3'][1:]
-        self.layer40 = se_resnext101_32x4d().__dict__['_modules']['layer4'][0]
-        self.layer41 = se_resnext101_32x4d().__dict__['_modules']['layer4'][1:]
-
-        # Expanding Path
-        self.cont12_1_2 = nn.ConvTranspose2d(2048, 256, 2, 2, 0)
-        self.cont12_1_1 = nn.ConvTranspose2d(2048, 256, 2, 2, 0)
-        self.block12_2 = Backbone_Block(256, 256, 3, 1, 1)
-        self.block12_3 = Backbone_Block(1280, 256, 3, 1, 1)
-        self.block12_4 = Backbone_Block(256, 256, 3, 1, 1)
-
-        if self.hook_indice[0] == 4:
-            if self.hook_indice[1] == 1:
-                self.cont22_1_2 = nn.ConvTranspose2d(320, 256, 2, 2, 0)
-            elif self.hook_indice[1] == 2:
-                self.cont22_1_2 = nn.ConvTranspose2d(384, 256, 2, 2, 0)
-            elif self.hook_indice[1] == 3:
-                self.cont22_1_2 = nn.ConvTranspose2d(512, 256, 2, 2, 0)
-            else:
-                raise ValueError(f'The hook_indice should be hook_indice[0](= {self.hook_indice[0]}) > hook_indice[1](= {self.hook_indice[1]}) > 0. Check your hook_indice.')
+        
+        self.channel_list = [[3328,3200], [896,832], [448,416], [160,144]]
+        self.resize_list = [[[24,40], [16,48]], [[48,80], [32,96]], [[96,160], [64,192]], [[192,320], [128,384]]]
+        
+        # (256x256) x 64
+        self.layer1 = se_resnext101_32x4d().__dict__['_modules']['layer0'][:-1]
+        # (128x128) x 256
+        self.layer2 = nn.Sequential(
+            se_resnext101_32x4d().__dict__['_modules']['layer0'][-1],
+            se_resnext101_32x4d().__dict__['_modules']['layer1']
+        )
+        # (64x64) x 512
+        self.layer3 = se_resnext101_32x4d().__dict__['_modules']['layer2']
+        # (32x32) x 1024
+        self.layer4 = se_resnext101_32x4d().__dict__['_modules']['layer3']
+        # (16x16) x 2048
+        self.layer5 = se_resnext101_32x4d().__dict__['_modules']['layer4']
+        
+        if self.hook_indice[0] == 0:
+            try: 
+                self.block52_1t = Backbone_Block(self.channel_list[0][self.hook_indice[1]], 256, 3, 1, 1)
+            except:
+                raise ValueError(f'hook_indice[1] must be 0 or 1')
         else:
-            self.cont22_1_2 = nn.ConvTranspose2d(256, 256, 2, 2, 0)
-        self.cont22_1_1 = nn.ConvTranspose2d(256, 256, 2, 2, 0)
-        self.block22_2 = Backbone_Block(256, 256, 3, 1, 1)
-        self.block22_3 = Backbone_Block(768, 256, 3, 1, 1)
-        self.block22_4 = Backbone_Block(256, 256, 3, 1, 1)
+            self.block52_1t = Backbone_Block(3072, 256, 3, 1, 1)
+        self.block52_1c = Backbone_Block(3072, 256, 3, 1, 1)    
+        self.block52_2 = Backbone_Block(256, 256, 3, 1, 1)
 
-        if self.hook_indice[0] == 3:
-            if self.hook_indice[1] == 1:
-                self.cont32_1_2 = nn.ConvTranspose2d(320, 128, 2, 2, 0)
-            elif self.hook_indice[1] == 2:
-                self.cont32_1_2 = nn.ConvTranspose2d(384, 128, 2, 2, 0)
-            else:
-                raise ValueError(f'The hook_indice should be hook_indice[0](= {self.hook_indice[0]}) > hook_indice[1](= {self.hook_indice[1]}) > 0. Check your hook_indice.')
+        if self.hook_indice[0] == 1:
+            try:
+                self.block42_1t = Backbone_Block(self.channel_list[1][self.hook_indice[1]-1], 128, 3, 1, 1)
+            except:
+                raise ValueError(f'hook_indice[1] must be 1 or 2')
         else:
-            self.cont32_1_2 = nn.ConvTranspose2d(256, 128, 2, 2, 0)
-        self.cont32_1_1 = nn.ConvTranspose2d(256, 128, 2, 2, 0)
-        self.block32_2 = Backbone_Block(128, 128, 3, 1, 1)
-        self.block32_3 = Backbone_Block(384, 128, 3, 1, 1)
-        self.block32_4 = Backbone_Block(128, 128, 3, 1, 1)
+            self.block42_1t = Backbone_Block(768, 128, 3, 1, 1)
+        self.block42_1c = Backbone_Block(768, 128, 3, 1, 1)
+        self.block42_2 = Backbone_Block(128, 128, 3, 1, 1)
 
         if self.hook_indice[0] == 2:
-            if self.hook_indice[1] == 1:
-                self.cont42_1_2 = nn.ConvTranspose2d(192, 64, 2, 2, 0)
-            else:
-                raise ValueError(f'The hook_indice should be hook_indice[0](= {self.hook_indice[0]}) > hook_indice[1](= {self.hook_indice[1]}) > 0. Check your hook_indice.')
+            try:
+                self.block32_1t = Backbone_Block(self.channel_list[2][self.hook_indice[1]-2], 64, 3, 1, 1)
+            except:
+                raise ValueError(f'hook_indice[1] must be 2 or 3')
         else:
-            self.cont42_1_2 = nn.ConvTranspose2d(128, 64, 2, 2, 0)
-        self.cont42_1_1 = nn.ConvTranspose2d(128, 64, 2, 2, 0)
-        self.block42_2 = Backbone_Block(64, 64, 3, 1, 1)
-        self.block42_3 = Backbone_Block(128, 64, 3, 1, 1)
-        self.block42_4 = Backbone_Block(64, 64, 3, 1, 1)
+            self.block32_1t = Backbone_Block(384, 64, 3, 1, 1)
+        self.block32_1c = Backbone_Block(384, 64, 3, 1, 1)
+        self.block32_2 = Backbone_Block(64, 64, 3, 1, 1)
 
-        self.cont52_1_1 = nn.ConvTranspose2d(64, 32, 2, 2, 0)
-        self.cont52_1_2 = nn.ConvTranspose2d(64, 32, 2, 2, 0)
-        self.block52_2 = Backbone_Block(32, 32, 3, 1, 1)
-        self.block52_3 = Backbone_Block(32, 16, 3, 1, 1)
-        self.block52_4 = Backbone_Block(16, 16, 3, 1, 1)
+        if self.hook_indice[0] == 3:
+            try: 
+                self.block22_1t = Backbone_Block(self.channel_list[3][self.hook_indice[1]-3], 32, 3, 1, 1)
+            except:
+                raise ValueError(f'hook_indice[1] must be 3 or 4')
+        else:
+            self.block22_1t = Backbone_Block(128, 32, 3, 1, 1)
+        self.block22_1c = Backbone_Block(128, 32, 3, 1, 1)
+        self.block22_2 = Backbone_Block(32, 32, 3, 1, 1)
+
+        if self.hook_indice[0] == 4:
+            try: 
+                self.block12_1t = Backbone_Block(48, 16, 3, 1, 1)
+            except:
+                raise ValueError(f'hook_indice[1] must be 4')
+        else:
+            self.block12_1t = Backbone_Block(32, 16, 3, 1, 1)
+        self.block12_1c = Backbone_Block(32, 16, 3, 1, 1)
+        self.block12_2 = Backbone_Block(16, 16, 3, 1, 1)
+
         
         self.output1 = nn.Conv2d(16, class_num, 3, 1, 1)
         self.output2 = nn.Softmax()
-        
+
     def context(self, x):
+        ## Context Branch
+
         # Contracting Path
-        x00 = self.layer00(x[:,1,...]) # 256
-        x01 = self.layer01(x00) # 128
-        x10 = self.layer10(x01) 
-        x11 = self.layer11(x10)
-        x20 = self.layer20(x11) # 64
-        x21 = self.layer21(x20)
-        x30 = self.layer30(x21) # 32
-        x31 = self.layer31(x30) 
-        x40 = self.layer40(x31) # 16
-        x41 = self.layer41(x40)
+        y2 = self.layer1(x)  # (256x256) x 64
+        y3 = self.layer2(y2)  # (128x128) x 256
+        y4 = self.layer3(y3)  # (64x64) x 512     
+        y5 = self.layer4(y4)  # (32x32) x 1024
+        y6 = self.layer5(y5)  # (16x16) x 2048
 
         # Expanding Path
-        x12_1_1 = self.cont12_1_1(x41)
-        x12_2 = self.block12_2(x12_1_1)        
-        x12_3 = self.block12_3(torch.cat([x12_2, x31], dim=1))
-        x12_4 = self.block12_4(x12_3)
+        y52 = F.interpolate(y6, scale_factor=2, mode="nearest")
+        y52_1 = self.block52_1c(torch.cat([y52, y5], dim=1))        
+        y52_2 = self.block52_2(y52_1) # 256
         
-        x22_1_1 = self.cont22_1_1(x12_4)
-        x22_2 = self.block22_2(x22_1_1)
-        x22_3 = self.block22_3(torch.cat([x22_2, x21], dim=1))
-        x22_4 = self.block22_4(x22_3)
+        y42 = F.interpolate(y52_2, scale_factor=2, mode="nearest")
+        y42_1 = self.block42_1c(torch.cat([y42, y4], dim=1))
+        y42_2 = self.block42_2(y42_1) # 128
         
-        if self.hook_indice[1] == 3:
-            return x22_4
-        x32_1_1 = self.cont32_1_1(x22_4)
-        x32_2 = self.block32_2(x32_1_1)
-        x32_3 = self.block32_3(torch.cat([x32_2, x11], dim=1))
-        x32_4 = self.block32_4(x32_3)
-        
-        if self.hook_indice[1] == 2:
-            return x32_4
-        x42_1_1 = self.cont42_1_1(x32_4)
-        x42_2 = self.block42_2(x42_1_1)
-        x42_3 = self.block42_3(torch.cat([x42_2, x00], dim=1))
-        x42_4 = self.block42_4(x42_3)
+        y32 = F.interpolate(y42_2, scale_factor=2, mode="nearest")
+        y32_1 = self.block32_1c(torch.cat([y32, y3], dim=1))
+        y32_2 = self.block32_2(y32_1) # 64
 
-        if self.hook_indice[1] == 1:
-            return x42_4
+        y22 = F.interpolate(y32_2, scale_factor=2, mode="nearest")
+        y22_1 = self.block22_1c(torch.cat([y22, y2], dim=1))
+        y22_2 = self.block22_2(y22_1) # 32 
+
+        y12 = F.interpolate(y22_2, scale_factor=2, mode="nearest")
+        y12_1 = self.block12_1c(y12)
+        y12_2 = self.block12_2(y12_1) # 16
+        
+        output_y1 = self.output1(y12_2)
+        output_y2 = self.output2(output_y1)
+
+        if self.hook_indice[1] == 0:
+            return y52_2[:,:,8:24,8:24], output_y2
+        elif self.hook_indice[1] == 1:
+            return y42_2[:,:,self.resize_list[0][(1-(self.hook_indice[1]-self.hook_indice[0]))][0]:self.resize_list[0][(1-(self.hook_indice[1]-self.hook_indice[0]))][1], self.resize_list[0][(1-(self.hook_indice[1]-self.hook_indice[0]))][0]:self.resize_list[0][(1-(self.hook_indice[1]-self.hook_indice[0]))][1]], output_y2
+        elif self.hook_indice[1] == 2:
+            return y32_2[:,:,self.resize_list[1][(1-(self.hook_indice[1]-self.hook_indice[0]))][0]:self.resize_list[1][(1-(self.hook_indice[1]-self.hook_indice[0]))][1], self.resize_list[1][(1-(self.hook_indice[1]-self.hook_indice[0]))][0]:self.resize_list[1][(1-(self.hook_indice[1]-self.hook_indice[0]))][1]], output_y2
+        elif self.hook_indice[1] == 3:
+            return y22_2[:,:,self.resize_list[2][(1-(self.hook_indice[1]-self.hook_indice[0]))][0]:self.resize_list[2][(1-(self.hook_indice[1]-self.hook_indice[0]))][1], self.resize_list[2][(1-(self.hook_indice[1]-self.hook_indice[0]))][0]:self.resize_list[2][(1-(self.hook_indice[1]-self.hook_indice[0]))][1]], output_y2
+        elif self.hook_indice[1] == 4:
+            return y12_2[:,:,self.resize_list[3][(1-(self.hook_indice[1]-self.hook_indice[0]))][0]:self.resize_list[3][(1-(self.hook_indice[1]-self.hook_indice[0]))][1], self.resize_list[3][(1-(self.hook_indice[1]-self.hook_indice[0]))][0]:self.resize_list[3][(1-(self.hook_indice[1]-self.hook_indice[0]))][1]], output_y2
 
     
     def forward(self, x):
+        ## Target Branch
+
         # Contracting Path
-        x00 = self.layer00(x[:,0,...]) # 256
-        x01 = self.layer01(x00) # 128
-        x10 = self.layer10(x01) 
-        x11 = self.layer11(x10)
-        x20 = self.layer20(x11) # 64
-        x21 = self.layer21(x20)
-        x30 = self.layer30(x21) # 32
-        x31 = self.layer31(x30) 
-        x40 = self.layer40(x31) # 16
-        x41 = self.layer41(x40)
+        x2 = self.layer1(x[:,0,...])  # (256x256) x 64
+        x3 = self.layer2(x2)  # (128x128) x 256
+        x4 = self.layer3(x3)  # (64x64) x 512
+        x5 = self.layer4(x4)  # (32x32) x 1024
+        x6 = self.layer5(x5)  # (16x16) x 2048
 
+        ## Context Model
+        y_hook, output_y2 = self.context(x[:,1,...])
+        
         # Expanding Path
-        x12_1_2 = self.cont12_1_2(x41)
-        x12_2 = self.block12_2(x12_1_2)        
-        x12_3 = self.block12_3(torch.cat([x12_2, x31], dim=1))
-        x12_4 = self.block12_4(x12_3)
+        if self.hook_indice[0] == 0:
+            x6 = torch.cat([x6, y_hook], dim=1) # 2048+256, 2048+128
+        x52 = F.interpolate(x6, scale_factor=2, mode="nearest")
+        x52_1 = self.block52_1t(torch.cat([x52, x5], dim=1)) # x+1024        
+        x52_2 = self.block52_2(x52_1)
 
-        if self.hook_indice[0] == 4:
-            y = self.context(x)
-            x12_4 = torch.cat([x12_4, y[:, :, y.shape[2]//2-16:y.shape[2]//2+16, y.shape[3]//2-16:y.shape[3]//2+16]], dim=1)
-        x22_1_2 = self.cont22_1_2(x12_4)
-        x22_2 = self.block22_2(x22_1_2)
-        x22_3 = self.block22_3(torch.cat([x22_2, x21], dim=1))
-        x22_4 = self.block22_4(x22_3)
+        if self.hook_indice[0] == 1:
+            x52_2 = torch.cat([x52_2, y_hook], dim=1) # 256 + 128, 256 + 64
+        x42 = F.interpolate(x52_2, scale_factor=2, mode="nearest")
+        x42_1 = self.block42_1t(torch.cat([x42, x4], dim=1)) # x + 512
+        x42_2 = self.block42_2(x42_1)
+
+        if self.hook_indice[0] == 2:
+            x42_2 = torch.cat([x42_2, y_hook], dim=1) # 128 + 64, 128 + 32           
+        x32 = F.interpolate(x42_2, scale_factor=2, mode="nearest")
+        x32_1 = self.block32_1t(torch.cat([x32, x3], dim=1)) # x + 256
+        x32_2 = self.block32_2(x32_1)
 
         if self.hook_indice[0] == 3:
-            y = self.context(x)
-            x22_4 = torch.cat([x22_4, y[:, :, (y.shape[2]//2)-32:(y.shape[2]//2)+32, (y.shape[3]//2)-32:(y.shape[3]//2)+32]], dim=1)
-        x32_1_2 = self.cont32_1_2(x22_4)
-        x32_2 = self.block32_2(x32_1_2)
-        x32_3 = self.block32_3(torch.cat([x32_2, x11], dim=1))
-        x32_4 = self.block32_4(x32_3)
-        
-        if self.hook_indice[0] == 2:
-            y = self.context(x)
-            x32_4 = torch.cat([x32_4, y[:, :, y.shape[2]//2-64:y.shape[2]//2+64, y.shape[3]//2-64:y.shape[3]//2+64]], dim=1)
-        x42_1_2 = self.cont42_1_2(x32_4)
-        x42_2 = self.block42_2(x42_1_2)
-        x42_3 = self.block42_3(torch.cat([x42_2, x00], dim=1))
-        x42_4 = self.block42_4(x42_3)
-        
-        x52_1_1 = self.cont52_1_1(x42_4)
-        x52_2 = self.block52_2(x52_1_1)
-        x52_3 = self.block52_3(x52_2)
-        x52_4 = self.block52_4(x52_3)    
+            x32_2 = torch.cat([x32_2, y_hook], dim=1) # 64 + 32, # 64 + 16
+        x22 = F.interpolate(x32_2, scale_factor=2, mode="nearest")
+        x22_1 = self.block22_1t(torch.cat([x22, x2], dim=1)) # x + 64
+        x22_2 = self.block22_2(x22_1)
 
-        output1 = self.output1(x52_4)
-        output2 = self.output2(output1)        
-        return output2
+        if self.hook_indice[0] == 4:
+            x22_2 = torch.cat([x22_2,  y_hook], dim=1) # 32 + 16
+        x12 = F.interpolate(x22_2, scale_factor=2, mode="nearest")
+        x12_1 = self.block12_1t(x12)
+        x12_2 = self.block12_2(x12_1)
+        
+        output_x1 = self.output1(x12_2)
+        output_x2 = self.output2(output_x1)
+        output = torch.stack((output_x2, output_y2), dim=1)
+        return output
 
 def hooknet_se_resnext101_32x4d(class_num, hook_indice):
     return Hooknet(class_num, hook_indice) 
